@@ -57,40 +57,100 @@ We evaluated the performance of our Modified Cache (Least Recently Used + Victim
 
 **Configuration**: 16KB L1 D-Cache (64 sets, 4 ways, 64-byte blocks).
 
-| Benchmark | VC Size 0 (Baseline) | VC Size 8 | VC Size 32 | Improvement (0 -> 32) |
-| :--- | :--- | :--- | :--- | :--- |
-| **bzip2** | 2.027% | 2.013% | 1.980% | ~2.3% |
-| **mcf** | 33.926% | 33.831% | 33.596% | ~1.0% |
-| **soplex** | 5.198% | 5.102% | 4.872% | ~6.3% |
-| **sjeng** | 5.662% | 5.514% | 5.339% | ~5.7% |
-| **lbm** | 11.710% | 11.658% | 11.655% | ~0.5% |
+| Benchmark | VC Size 0 (Baseline) | VC Size 8 | VC Size 32 | Improvement (0 -> 8) | Improvement (0 -> 32) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **bzip2** | 2.027% | 2.013% | 1.980% | 0.695% | 2.374% |
+| **mcf** | 33.926% | 33.831% | 33.596% | 0.281% | 0.982% |
+| **soplex** | 5.198% | 5.102% | 4.872% | 1.882% | 6.691% |
+| **sjeng** | 5.662% | 5.514% | 5.339% | 2.684% | 6.050% |
+| **lbm** | 11.710% | 11.658% | 11.655% | 0.446% | 0.472% |
+
+```mermaid
+---
+config:
+    themeVariables:
+        xyChart:
+            plotColorPalette: '#94A378, #2D3C59'
+---
+xychart
+    title "Relative Performance Improvement from Baseline"
+    x-axis "Benchmark" [bzip2, mcf, soplex, sjeng, lbm]
+    y-axis "Relative Miss Rate Reduction (%)"
+    %% Green Bars (Size 32)
+    bar [2.374, 0.982, 6.691, 6.050, 0.472]
+    %% Blue Bars (Size 8)
+    bar [0.695, 0.281, 1.882, 2.684, 0.446]
+```
+<p align="center">
+<sub><b>Figure 1:</b> Relative reduction in L1 Miss Rate. <b>Blue:</b> 8-entry VC, <b>Green:</b> 32-entry VC.</sub>
+</p>
 
 ### Analysis
-1.  **Effect of Victim Cache Size**:
-    - **Strong Benefit (soplex, sjeng)**: These benchmarks show significant improvement (~5-6% relative reduction in misses). This indicates they suffer from frequent conflict misses in specific cache sets that are well-mitigated by the victim cache. For `soplex`, the improvement jumps significantly from size 8 to 32, suggesting a working set of conflicts larger than 8 lines.
-    - **Moderate Benefit (bzip2)**: Shows consistent improvement as size increases, confirming the presence of conflict misses.
-    - **Weak Benefit (mcf, lbm)**: `mcf` (capacity-bound) and `lbm` (streaming nature) show negligible improvement (< 1%). A small 32-entry buffer cannot compensate for a working set that vastly exceeds the 16KB L1 cache capacity or for scanning through large arrays without reuse.
+1.  **Effect of Victim Cache Size** \
+Based on the miss rate response to increase VC size (0 -> 32), the benchmarks fall into three distinct categories:
+    - **Conflict-Heavy (Ideal Use Case):** `soplex` and `sjeng` show the highest sensitivity to the VC. Their ~6% improvement suggests these programs suffer from "thrashing" in specific sets. The VC effectively acts as a safety net, providing pseudo-associativity that catches these evicted lines before they incur a main memory penalty.
+    - **Capacity-Bound:** `mcf` is characterized by a massive 33.9% baseline miss rate. The negligible improvement (~1%) indicates that its working set is significantly larger than the combined L1 + VC capacity. For `mcf`, the VC is simply too small to make a dent in the constant stream of evictions.
+    - **Streaming/Low-Reuse:** `lmb` and `bzip2` show minor gains. In the case of `lbm`, the benefit saturates at Size 8 (~0.5%). This suggests a "streaming" pattern where data is accessed with very little temporal locality; once a line is evicted, it is rarely needed again quickly enough to be caught by the VC.
 
-2.  **Saturation Point**:
-    - For `lbm`, the benefit effectively saturates at Size 8 (11.658% vs 11.655%), implying that further increasing the victim cache yields no return.
-    - Conversely, `soplex` sees a larger jump from Size 8 to Size 32 (5.102% -> 4.872%), suggesting it benefits more from the larger associative buffer.
+2.  **Effect on AMAT**\
+We will model AMAT performance assuming a **1-cycle** L1 hit time, a **100-cycle** miss penalty, and that the VC is accessed in **parallel**. We will use the standard equation as follows: $\text{AMAT} = \text{Hit Time} + (\text{Miss Rate} \times \text{Miss Penalty})$.
 
-3.  **Effect on AMAT and CPI**:
-    - The reduction in L1 miss rate directly improves Average Memory Access Time ($AMAT = HitTime + MissRate \times MissPenalty$).
-    - For `soplex` and `sjeng`, the ~6% drop in misses is substantial enough to likely produce a measurable speedup in execution time.
+<div align="center">
 
-4.  **Resource Cost**:
-    - **Storage**: 32 entries $\times$ 64 bytes/line = 2048 bytes (2KB) of data.
-    - **Metadata**: 32 tags ($\sim$40 bits each) + Valid/Dirty bits + Replacement bits. Roughly $32 \times 6$ bytes $\approx$ 192 bytes.
-    - **Total Overhead**: ~2.2 KB. compared to the 16KB main cache, this is a ~13.75% area overhead.
-    - Given the observable ~6% improvement in multiple benchmarks (`soplex`, `sjeng`), this hardware cost is justifiable.
+| Benchmark | Baseline AMAT (cycles) | VC-32 AMAT (cycles) | Speedup |
+| :--- | :--- | :--- | :--- |
+| **bzip2** | 3.027 | 2.980 | 1.55% |
+| **mcf** | 34.926 | 34.596 | 0.94% |
+| **soplex** | 6.198 | 5.872 | 5.26% |
+| **sjeng** | 6.662 | 6.339 | 4.85% |
+| **lbm** | 12.710 | 12.655 | 0.43% |
+    
+</div>
 
-5.  **Victim Cache Sizing Recommendation**:
-    - Based on our data, we recommend a **32-entry** Victim Cache.
-    - While `lbm` sees little benefit, `soplex` and `sjeng` clearly utilize the extra capacity of the 32-entry buffer over the 8-entry one.
+```mermaid
+---
+config:
+    themeVariables:
+        xyChart:
+            plotColorPalette: '#D1855C'
+---
+xychart
+    title "AMAT Speedup from Baseline"
+    x-axis "Benchmark" [bzip2, mcf, soplex, sjeng, lbm]
+    y-axis "AMAT Speedup (%)"
+    bar [1.55, 0.94, 5.26, 4.85, 0.43]
+```
+<p align="center">
+<sub><b>Figure 2:</b> VC-32 Effect on AMAT.</sub>
+</p>
 
-6.  **Program Phases**:
-    - The effectiveness of the victim cache in `soplex` and `sjeng` suggests these programs have phases where execution lingers on a few sets, causing thrashing (rapid eviction and reload). The victim cache effectively "extends" the associativity of these hot sets during such phases.
+3.  **Resource Cost:**\
+To justify the implementation, we must weigh the performance gains against the overhead. Our VC is fully associative, so we must weigh the memory overhead AND the required logic.
+    - **Storage Overhead (32-Entry VC)**
+        - **Data Array:** 32 entries $\times$ 64 bytes = 2048 bytes (2KB).
+        - **Metadata:** 32 tags ($\sim$40 bits each) + Valid/Dirty bits + Replacement bits. Roughly $32 \times 6$ bytes $\approx$ 192 bytes.
+        - **Total Storage Overhead**: ~2.2 KB. compared to the 16KB main cache, this is a ~13.75% area overhead.
+    - **Logic & Complexity:**
+        - **Comparators:** Unlike the 4-way L1 which uses 4 comparators, the VC-32 requires **32-comparators** to operate in a single cycle. Depending on if the VC is accessed in parallal or serial the energy cost will increase either on every memory access or every L1 miss respectively.
+        - **Routing:** The "swap" logic between the L1 and VC will require a wide data path to move 64-byte blocks, adding to wiring congestion.
+  
+
+4.  **Victim Cache Sizing Recommendation:**\
+    Based on the data, we have two viable paths depending on the design goals:
+    
+    <div align="center">
+    
+    | Metric | VC-8 | VC-32 |
+    | :--- | :--- | :--- |
+    | **Avg. Miss Reduction** | ~1.19% | ~3.30% |
+    | **Area Overhead** | ~3.5% | ~13.8% |
+    | **Best For** | Energy Efficiency | Performance |
+    
+    </div>
+    
+    - **Final Recommendation & Design Trade-offs:**
+        - **Case for VC-8:** The optimal design choice hinges on balancing silicon area constraints against the specific performance needs of the target workload. For general-purpose processors, an 8-entry Victim Cache is the most balanced selection; it effectively captures the "low-hanging fruit" by providing a meaningful reduction in miss rates with negligible timing pressure on the L1 miss path.
+        - **Case for VC-32:** Conversely, for specialist silicon or high-performance computing environments, we recommend a 32-entry Victim Cache. In conflict-heavy benchmarks such as `soplex` and `bzip2`, moving from 8 to 32 entries yields a substantial 3x to 4x increase in performance benefit. For these specific applications, like linear programming or heavy compression, the 13.9% area overhead is a justifiable trade-off for the resulting 5-6% AMAT speedup.
 
 ## Appendix: Diff of Modifications
 
