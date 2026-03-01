@@ -57,6 +57,8 @@ We evaluated the performance of our Modified Cache (Least Recently Used + Victim
 
 **Configuration**: 16KB L1 D-Cache (64 sets, 4 ways, 64-byte blocks).
 
+<div align="center">
+
 | Benchmark | VC Size 0 (Baseline) | VC Size 8 | VC Size 32 | Improvement (0 -> 8) | Improvement (0 -> 32) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **bzip2** | 2.027% | 2.013% | 1.980% | 0.695% | 2.374% |
@@ -64,6 +66,8 @@ We evaluated the performance of our Modified Cache (Least Recently Used + Victim
 | **soplex** | 5.198% | 5.102% | 4.872% | 1.882% | 6.691% |
 | **sjeng** | 5.662% | 5.514% | 5.339% | 2.684% | 6.050% |
 | **lbm** | 11.710% | 11.658% | 11.655% | 0.446% | 0.472% |
+
+</div>
 
 ```mermaid
 ---
